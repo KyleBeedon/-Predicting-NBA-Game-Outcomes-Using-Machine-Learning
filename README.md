@@ -1,4 +1,4 @@
-#Predicting NBA Game Outcomes Using Machine Learning
+# Predicting NBA Game Outcomes Using Machine Learning
 
 This project was my senior practicum and focuses on predicting NBA game outcomes using aggregates of advanced team statistics, such as Net Rating and Effective Field Goal Percentage (eFG%), along with other relevant details about each game, such as which team was playing at home.
 
