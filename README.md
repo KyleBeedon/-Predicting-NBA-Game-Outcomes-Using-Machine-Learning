@@ -1,3 +1,5 @@
+Predicting NBA Game Outcomes Using Machine Learning
+
 This project was my senior practicum and focuses on predicting NBA game outcomes using aggregates of advanced team statistics, such as Net Rating and Effective Field Goal Percentage (eFG%), along with other relevant details about each game, such as which team was playing at home.
 
 Data was scraped from Basketball-Reference.com using the BoxScoreScraper.ipynb notebook, which produced box_scores.csv. The raw dataset was then cleaned and aggregated using R in the DataCleaning.Rmd file, resulting in Final.csv. Machine learning models were implemented and tested in the Practicum.ipynb notebook.
