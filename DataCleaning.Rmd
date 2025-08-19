@@ -1,0 +1,396 @@
+---
+title: "DataCleaning"
+author: "Kyle Beedon"
+date: "7/16/2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,echo=FALSE}
+library(tidyverse)
+library(dplyr)
+library(zoo)
+library(purrr)
+```
+
+# Data Cleaing
+
+```{r}
+# Start by loading the CSV
+box_scores <- read_csv("~/Documents/PastClassesAndLearning/PastSemesters/Fall24/Practicum/FINALWORKS/SecondProject/Data/box_scores.csv")
+```
+
+### Rename all of the variables to reflect their actual definition.  
+
+```{r}
+# If I could do this again, I'd do it in python
+box_scores <- box_scores %>%
+  rename(LESSS = 1, game_number = 2,date = 3,home = 4,opp = 5,result = 6,points = 7,opp_points = 8, OT = 9, FG = 10, FGA = 11, `FG%` = 12, `3P` = 13, `3PA` = 14, `3P%` = 15, `2P` = 16, `2PA` = 17, `2P%` = 18, `eFG%` = 19, FT = 20, FTA = 21, `FT%` = 22, ORB = 23, DRB = 24, TRB = 25, AST = 26, STL = 27, BLK = 28, TOV = 29, PF = 30, opp_FG = 31, opp_FGA = 32, `opp_FG%` = 33, `opp_3P` = 34, `opp_3PA` = 35, `opp_3P%` = 36, `opp_2P` = 37, `opp_2PA` = 38, `opp_2P%` = 39, `opp_eFG%` = 40, opp_FT = 41, opp_FTA = 42, `opp_FT%` = 43, opp_ORB = 44, opp_DRB = 45, opp_TRB = 46, opp_AST = 47, opp_STL = 48, opp_BLK = 49, opp_TOV = 50, opp_PF = 51, team = 52, season = 53) %>%
+  select(-LESSS, -OT,) %>%    # Remove columns: rank and OT
+  slice(-1)              # Remove the first row
+```
+
+### Remove all rows where the column 'game_number' = "Gtm", and remove season summaries (Where game_number is NA). 
+
+```{r}
+box_scores <- box_scores[box_scores$game_number != "Gtm", ]
+box_scores <- box_scores %>%
+  filter(!is.na(game_number))
+```
+
+### Fix the home variable: whenever home is "@", set home to 0, and when home is " ", set home to 1.
+
+```{r, warning=FALSE}
+box_scores <- box_scores %>%
+  mutate(
+    home = case_when(
+      is.na(home) ~ 1,                # Set home to 1 if it's NA
+      home == "@" ~ 0,                # Set home to 0 if it's "@"
+      TRUE ~ as.numeric(home)         # Convert other values to numeric if needed
+    )
+  )
+```
+
+### Change all variables to numeric
+
+```{r}
+box_scores <- box_scores %>%
+  mutate(across(
+    c(game_number, home, points, opp_points, FG, FGA, `FG%`, `3P`, `3PA`, `3P%`, `2P`, `2PA`, `2P%`, `eFG%`, FT, FTA, `FT%`, ORB, DRB, TRB, AST, STL, BLK, TOV, PF, opp_FG, opp_FGA, `opp_FG%`, opp_3P, opp_3PA, `opp_3P%`, opp_2P, opp_2PA, `opp_2P%`, `opp_eFG%`,  opp_FT, opp_FTA, `opp_FT%`, opp_ORB, opp_DRB, opp_TRB, opp_AST, opp_STL, opp_BLK, opp_TOV, opp_PF),
+    ~ as.numeric(.)
+  ))
+```
+
+## Add some additional columns
+
+### Add variables: back_to_backs, win%, game_id
+
+```{r}
+box_scores <- box_scores %>%
+  mutate(date = as.Date(date)) %>%  # Ensure date is in Date format
+  group_by(team, season) %>%
+  arrange(team, season, date) %>%   # Sort for team-level calculations
+  mutate(
+    back_to_back = if_else(date - lag(date) == 1, 1, 0, missing = 0),
+    `win%` = if_else(result == "W", 1, 0)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    date_numeric = as.character(date),
+    row_order = row_number()
+  ) %>%
+  group_by(date_numeric, game_group = paste0(date_numeric, "_", pmin(team, opp), "_", pmax(team, opp))) %>%
+  arrange(row_order, .by_group = TRUE) %>%
+  mutate(
+    gameId = paste0(date_numeric, "_", first(team), "_", first(opp))
+  ) %>%
+  ungroup() %>%
+  select(-game_group, -row_order)
+# Rather than creating gameid based on the alphabetical order, I wanted to do it in a randomized orders
+```
+
+### Remove percentages (To be calculated later)
+
+```{r}
+box_scores <- box_scores %>%
+  select(-`FG%`, -`FT%`, -`3P%`, -`eFG%`, -`opp_FG%`, -`opp_FT%`, -`opp_3P%`, -`opp_eFG%`, 
+         -`2P`, -`2PA`, -`2P%`, -`opp_2P`, -`opp_2PA`, -`opp_2P%`)
+```
+
+## Find season stats
+
+Find the averages of each statistic, by season, by team, and store in a separate dataset called season_stats
+
+```{r} 
+season_stats <- box_scores %>%
+  group_by(season, team) %>%
+  summarise(
+    game_number = n(),
+    Wins = sum(result == "W", na.rm = TRUE),
+    `win%` = Wins / game_number,
+    across(
+      c(points, opp_points, FG, FGA, `3P`, `3PA`, FT, FTA, ORB, DRB, TRB,
+        AST, STL, BLK, TOV, PF, 
+        opp_FG, opp_FGA, opp_3P, opp_3PA, opp_FT, opp_FTA,
+        opp_ORB, opp_DRB, opp_TRB, opp_AST, opp_STL, opp_BLK,
+        opp_TOV, opp_PF),
+      ~ mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  )
+```
+
+# Create final box score dataset for ML
+
+Aggregate definition: Using the game number for a given team for a given season, if the game number = 1, use the previous years statistics. If game number = x and x is <=25, then use the means from the previous x-1 games. If game number is > 25, use the previous 25 games to find the averages.
+
+```{r}
+NUMBER_OF_AGG_GAMES = 25 # Change this number to create a different aggregation
+# After testing with various different aggregates, 25 performed the best
+
+transform_box_scores <- function(box_scores, seasons) {
+  # Columns that should be preserved as-is
+  meta_cols <- c("game_number", "date", "home", "opp", "result", 
+                 "team", "season", "back_to_back", "date_numeric", "gameId")
+  
+  # All other columns will be transformed
+  stat_cols <- setdiff(names(box_scores), meta_cols)
+
+  final_list <- list()
+
+  # Loop by team
+  for (tm in unique(box_scores$team)) {
+    print(tm)
+    team_data <- box_scores %>% filter(team == !!tm)
+    
+    # Loop by season
+    for (season in unique(team_data$season)) {
+      season_data <- team_data %>%
+        filter(season == !!season) %>%
+        arrange(game_number)
+      
+      n_games <- nrow(season_data)
+
+      for (i in seq_len(n_games)) {
+        game_row <- season_data[i, ]
+        game_num <- game_row$game_number
+
+        # Get stat row based on game number logic
+        if (game_num == 1) {
+          # Use previous season averages
+          prev_stats <- seasons %>%
+            filter(team == !!tm, season == !!(season - 1)) %>%
+            select(all_of(stat_cols))
+        
+          if (nrow(prev_stats) > 0) {
+            stat_row <- prev_stats[1, ]
+          } else {
+            # Create an NA row with named columns
+            stat_row <- as_tibble(setNames(rep(NA_real_, length(stat_cols)), stat_cols))
+          }
+
+        } else if (game_num <= NUMBER_OF_AGG_GAMES) {
+          stat_row <- season_data[1:(i - 1), stat_cols] %>%
+            summarise(across(everything(), mean, na.rm = TRUE))
+        } else {
+          stat_row <- season_data[(i - NUMBER_OF_AGG_GAMES):(i - 1), stat_cols] %>%
+            summarise(across(everything(), mean, na.rm = TRUE))
+        }
+
+        # Bind with meta columns
+        final_row <- bind_cols(game_row[meta_cols], stat_row)
+        final_list[[length(final_list) + 1]] <- final_row
+      }
+    }
+  }
+
+  # Combine all rows into final dataset
+  final_dataset <- bind_rows(final_list)
+  return(final_dataset)
+}
+```
+
+```{r}
+temp_dataset <- transform_box_scores(box_scores, season_stats)
+```
+
+### Remove all entries that occur in the 2015 season
+
+```{r}
+final_dataset <- temp_dataset %>%
+  filter(season >= 2016) %>%
+    select(-value)
+```
+
+### Add some advanced metrics and standard percentages
+
+```{r}
+final_dataset <- final_dataset %>%
+  mutate(
+    # Turnover %
+    `TOV%` = round(100 * TOV / (FGA + 0.44 * FTA + TOV), 3),
+    `opp_TOV%` = round(100 * opp_TOV / (opp_FGA + 0.44 * opp_FTA + opp_TOV), 3),
+
+    # Offensive Rebound %
+    `ORB%` = round(100 * ORB / (ORB + opp_DRB), 3),
+    `opp_ORB%` = round(100 * opp_ORB / (opp_ORB + DRB), 3),
+
+    # Defensive Rebound %
+    `DRB%` = round(100 * DRB / (DRB + opp_ORB), 3),
+    `opp_DRB%` = round(100 * opp_DRB / (opp_DRB + ORB), 3),
+
+    # Possessions estimate
+    possessions = 0.5 * (
+      (FGA + 0.4 * FTA - 1.07 * (ORB / (ORB + opp_DRB)) * (FGA - FG) + TOV) +
+      (opp_FGA + 0.4 * opp_FTA - 1.07 * (opp_ORB / (opp_ORB + DRB)) * (opp_FGA - opp_FG) + opp_TOV)
+    ),
+
+    # Offensive & Defensive Rating
+    OFF_rating = 100 * points / possessions,
+    DEF_rating = 100 * opp_points / possessions,
+    NET_rating = OFF_rating - DEF_rating,
+
+    # Shooting %
+    `FG%` = 100 * FG / FGA,
+    `opp_FG%` = 100 * opp_FG / opp_FGA,
+
+    `3P%` = 100 * `3P` / `3PA`,
+    `opp_3P%` = 100 * opp_3P / opp_3PA,
+
+    `FT%` = 100 * FT / FTA,
+    `opp_FT%` = 100 * opp_FT / opp_FTA,
+
+    # Effective FG%
+    `eFG%` = (FG + 0.5 * `3P`) / FGA,
+    `opp_eFG%` = (opp_FG + 0.5 * opp_3P) / opp_FGA
+  )
+```
+
+### Transition to 1's and 0's instead of W's and L's
+
+```{r}
+final_dataset <- final_dataset %>% mutate(result = ifelse(result == "W", 1, 0))
+```
+
+
+## ELO Rating
+
+```{r}
+update_elo_ratings_long <- function(df,
+                                    base_elo = 1500,
+                                    small_gap = 75,
+                                    large_gap = 150,
+                                    small_gap_change = 16,
+                                    large_win_change = 8,
+                                    large_upset_change = 32) {
+  # Sort to ensure consistency
+  df <- df %>%
+    arrange(gameId)  # Arrange the data frame by gameId so games are processed in chronological order
+  
+  # Track current Elo for each team
+  elo_ratings <- list()  # Initialize an empty list to store the current Elo rating for each team
+  
+  # New column to store Elo before each game
+  df$elo <- NA_real_  # Create a new column in df to hold the Elo rating of each team before the game, initialize with NA
+  
+  # Loop over each unique gameId (each game)
+  for (gid in unique(df$gameId)) {
+    game_rows <- df[df$gameId == gid, ]  # Subset df to get the two rows corresponding to this game (one per team)
+    
+    # Extract the team names for the two teams in the game
+    team1 <- game_rows$team[1]  
+    team2 <- game_rows$team[2]
+    
+    # Extract the game result from the first row; 1 means team1 won, else team2 won
+    result1 <- game_rows$result[1]  
+    
+    # Get current Elo ratings for each team; if not found, initialize to base_elo (default 1500)
+    elo1 <- elo_ratings[[team1]] %||% base_elo  
+    elo2 <- elo_ratings[[team2]] %||% base_elo  
+    
+    # Assign these Elo ratings to the Elo column for the corresponding teams and game
+    df$elo[df$gameId == gid & df$team == team1] <- elo1  
+    df$elo[df$gameId == gid & df$team == team2] <- elo2  
+    
+    # Calculate absolute difference between the two Elo ratings
+    diff <- abs(elo1 - elo2)  
+    
+    # Determine which team won and which lost based on the result
+    if (result1 == 1) {
+      winner <- team1
+      loser <- team2
+      winner_elo <- elo1
+      loser_elo <- elo2
+    } else {
+      winner <- team2
+      loser <- team1
+      winner_elo <- elo2
+      loser_elo <- elo1
+    }
+    
+    # Decide how much to adjust Elo ratings (delta) based on the difference in Elo ratings
+    if (diff < small_gap) {
+      delta <- small_gap_change  # If Elo difference is small, use the standard small gap Elo change
+    } else if (diff > large_gap) {
+      # If the difference is large, check if it was an expected outcome or an upset
+      if (winner_elo > loser_elo) {
+        delta <- large_win_change  # Expected win by the stronger team, smaller Elo change
+      } else {
+        delta <- large_upset_change  # Upset win by the weaker team, larger Elo change
+      }
+    } else {
+      delta <- small_gap_change  # For Elo differences in between, apply the small gap change
+    }
+    
+    # Update the Elo ratings for winner and loser
+    elo_ratings[[winner]] <- winner_elo + delta  # Increase winner's Elo by delta
+    elo_ratings[[loser]] <- loser_elo - delta    # Decrease loser's Elo by delta
+  }
+  
+  # Return the original dataframe with the added 'elo' column showing Elo before each game
+  return(df)
+}
+```
+
+### Run the function
+
+```{r}
+final_dataset <- update_elo_ratings_long(final_dataset)
+```
+
+
+## Assign Row ordered pairs
+
+```{r}
+box_pair_rows <- final_dataset %>%
+  arrange(gameId, row_number()) %>%
+  group_by(gameId) %>%
+  mutate(row_order = row_number()) %>%
+  ungroup()
+
+# Create .x and .y versions
+box_x <- box_pair_rows %>%
+  filter(row_order == 1) %>%
+  select(-row_order) %>%
+  rename_with(~ paste0(.x, ".x"))
+
+box_y <- box_pair_rows %>%
+  filter(row_order == 2) %>%
+  select(-row_order) %>%
+  rename_with(~ paste0(.x, ".y"))
+
+# Join on gameId (matching .x and .y versions)
+paired_dataset <- box_x %>%
+  inner_join(box_y, by = c("gameId.x" = "gameId.y"))
+```
+
+## Select only the columns needed for modeling
+
+```{r}
+cols_to_keep <- c(
+  "season.x", "date.x", "team.x", "game_number.x", "home.x", "result.x", "back_to_back.x",
+  "eFG%.x", "FT%.x", "ORB%.x", "DRB%.x", "TOV%.x", "opp_eFG%.x", "opp_TOV%.x",
+  "NET_rating.x", "win%.x", "elo.x",
+  "team.y", "game_number.y", "back_to_back.y", "eFG%.y", "FT%.y", "ORB%.y", "DRB%.y",
+  "TOV%.y", "opp_eFG%.y", "opp_TOV%.y", "NET_rating.y", "win%.y", "elo.y"
+)
+
+# Select only those columns from dataset, preserving names exactly
+final_dataset <- paired_dataset %>%
+  select(all_of(cols_to_keep)) %>%
+  rename(
+    season = season.x,
+    date = date.x,
+    result = result.x
+  )
+```
+
+### Save as a CSV
+
+```{r}
+write.csv(final_dataset, "~/Documents/PastClassesAndLearning/PastSemesters/Fall24/Practicum/FINALWORKS/SecondProject/Data/Final.csv", row.names = FALSE)
+```
